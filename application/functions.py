@@ -14,6 +14,9 @@ CV_QR_EAST = 1
 CV_QR_SOUTH = 2
 CV_QR_WEST = 3
 
+OTSU_BINARIZATION = 0
+THRES_BINARIZATION = 1
+
 def distancia(c1, c2):
 
     delta_x = np.absolute(c1[0] - c2[0])
@@ -249,6 +252,8 @@ def get_marcadores_indice(contornos, herencia):
     
     return mark, A, B, C
 
+class OffLineExeption(Exception):
+    pass
 
 def get_offline(centros_de_masas, A, B, C):
     
@@ -256,11 +261,11 @@ def get_offline(centros_de_masas, A, B, C):
     BC = distancia(centros_de_masas[B,:], centros_de_masas[C,:])
     CA = distancia(centros_de_masas[C,:], centros_de_masas[A,:])
 
-    if((AB>BC)and(AB>CA)):
+    if((AB > BC) and (AB > CA)):
         valor_mayor = C
         mediana_1 = A
         mediana_2 = B
-    elif ((CA>AB)and(CA>BC)):
+    elif ((CA > AB) and (CA > BC)):
         valor_mayor = B
         mediana_1 = A
         mediana_2 = C
@@ -268,7 +273,9 @@ def get_offline(centros_de_masas, A, B, C):
         valor_mayor = A
         mediana_1 = B
         mediana_2 = C
-    
+    else:
+        raise OffLineExeption
+
     return valor_mayor, mediana_1, mediana_2
 
 
@@ -320,10 +327,17 @@ def correccion_perspectiva(vertices, imagen):
     warped = cv2.warpPerspective(imagen, warp_matrix,(500,500),borderMode=cv2.BORDER_REPLICATE)
     imagen = cv2.copyMakeBorder(warped,10,10,10,10,cv2.BORDER_CONSTANT,value=(255,255,255))
     
-    _, binary = cv2.threshold(cv2.cvtColor(imagen,cv2.COLOR_BGR2GRAY), 100,255,cv2.THRESH_BINARY)
-    _, otsu = cv2.threshold(cv2.cvtColor(imagen,cv2.COLOR_BGR2GRAY),0,255,cv2.THRESH_BINARY+cv2.THRESH_OTSU)
+    return imagen
+    
 
-    return binary, otsu
+def binarizado_imagen(imagen, metodo=OTSU_BINARIZATION):
+
+    if metodo == OTSU_BINARIZATION:
+        _, otsu = cv2.threshold(cv2.cvtColor(imagen,cv2.COLOR_BGR2GRAY),0,255,cv2.THRESH_BINARY+cv2.THRESH_OTSU)
+        return otsu
+    
+    _, binary = cv2.threshold(cv2.cvtColor(imagen,cv2.COLOR_BGR2GRAY), 100,255,cv2.THRESH_BINARY)
+    return binary
 
 def plot_marcadores(imagen, contornos, top, rigth, bottom, N, tickness=1):
 

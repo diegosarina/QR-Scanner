@@ -35,8 +35,22 @@ while(True):
     mark, A, B, C = get_marcadores_indice(contornos, herencia)
 
     if mark>=3: #marcadores descubiertos
+        area_A = cv2.contourArea(contornos[A])
+        area_B = cv2.contourArea(contornos[B])
+        area_C = cv2.contourArea(contornos[C])
 
-        top, mediana_1, mediana_2 = get_offline(centros_de_masas, A, B, C)
+        area_promedio = (area_A + area_B + area_C) / 3
+
+        if not ((area_A > area_promedio * 0.8 and area_A < area_promedio * 1.2)
+            and (area_B > area_promedio * 0.8 and area_B < area_promedio * 1.2)
+            and (area_C > area_promedio * 0.8 and area_C < area_promedio * 1.2)):
+            continue
+        
+        try:
+            top, mediana_1, mediana_2 = get_offline(centros_de_masas, A, B, C)
+        except OffLineExeption:
+            continue
+        
         dist = lineEquation(
             centros_de_masas[mediana_1],
             centros_de_masas[mediana_2],
@@ -66,15 +80,21 @@ while(True):
             
             O = updateCornerOr(orientation,getVerices(contornos, bottom, slope))
             try:
-                N = getIntersectionPoint(M[1], M[2], O[3], O[2]) #calculo del punto de interseccion N
+                N = getIntersectionPoint(M[1], M[2], O[3], O[2]) #calculo del punto de interseccion N 
             except IntersPointError:
                 continue
             
+            try:
+                pixel = centro[N[1],N[0]]
+            except:
+                continue
 
             vert_externos = np.array(([L[0], M[1], N, O[3]]),dtype=np.float32)
             
-            qr_binario, qr_otsu = correccion_perspectiva(vert_externos,centro)
-        
+            imagen_perspectiva_corregida = correccion_perspectiva(vert_externos,centro)
+
+            qr_binarizado = binarizado_imagen(imagen_perspectiva_corregida)
+
             img_marcadores = plot_marcadores(
                 np.copy(centro), 
                 contornos,
@@ -86,14 +106,11 @@ while(True):
 
             cv2.imshow("IMAGEN MARCADORES",img_marcadores)
 
-            cv2.imshow("QR THRES",qr_binario)
-            cv2.imshow("QR OTSU", qr_otsu)
-
             traces = np.zeros((np.shape(centro)),dtype=np.uint8)
             
-            DBG = 1
+            DBG = 0
             if(DBG == 1):
-                
+            
                 cv2.drawContours(traces,contornos,top,(255,0,100),1)
                 cv2.drawContours(traces,contornos,rigth,(255,0,100),1)
                 cv2.drawContours(traces,contornos,bottom,(255,0,100),1)
@@ -113,18 +130,16 @@ while(True):
                     (20,30), cv2.FONT_HERSHEY_PLAIN, 
                     1, (0,255,0), 1, 8
                 )
-
+                
+                
                 cv2.imshow("DBG", traces)
+                cv2.imshow("Original",img_original)
 
-            #lectura del qr
-            #hacer una lista qeu contenga las imagenes binarizadas por 
-            #otsu y por la binarizacion comun ... recorrer con un for
-            # si se encuentra la imagen a la primera, ya esta. 
+            cv2.imshow("QR BINARIZADO", qr_binarizado)
+            qr_Data, qr_Type = decode_qr(qr_binarizado)
+            print(f"Tipo {qr_Type}, Data: {qr_Data}")
 
-            qr_Data, qr_Type = decode_qr(qr_otsu)
-            print(f"Tipo{qr_Type}, Data:{qr_Data}")
 
-    cv2.imshow("Original",img_original)
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 cap.release()
