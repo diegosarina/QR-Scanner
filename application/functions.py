@@ -125,24 +125,33 @@ def updateCornerOr(orientation, verticesIN):
     }[orientation]
 
 
-def cross(v1,v2):
+class IntersPointError(Exception):
+    pass
 
-    return v1[0] * v2[1] - v1[1] * v2[0]
+def getIntersectionPoint(a1,a2,b1,b2):
 
+    delta_a = a2 - a1
+    delta_b = b2 - b1
 
-def getIntersectionPoint(a1, a2, b1, b2):
+    m_a = delta_a[1] / delta_a[0]
+    m_b = delta_b[1] / delta_b[0]
 
-    p = a1
-    q = b1 
-    r = (a2-a1)
-    s = (b2-b1)
+    M = np.array([[-m_a,1],[-m_b,1]])
 
-    if not cross(r,s):
-        return int(0)
+    try:
+        inversa_M = np.linalg.inv(M)
+    except np.linalg.LinAlgError:
+        raise IntersPointError
     
-    t = cross(q-p,s)/cross(r,s)
-    intersection = p + t*r
-    return np.array((int(intersection[0]), int(intersection[1])), dtype=np.int32)
+    b_a = a1[1] - (m_a) * a1[0]
+    b_b = b1[1] - (m_b) * b1[0]
+
+    B = np.array([[b_a],[b_b]])
+
+    intersection_point = np.dot(inversa_M,B)
+
+    return np.int32(np.transpose(intersection_point))[0]
+
 
 
 def get_fondo_centro(frame, porcent_x, porcent_y):
@@ -363,22 +372,3 @@ def decode_qr(qr_codificado):
 
         
     return qr_Data, qr_Type
-
-'''
-barcodes = pyzbar.decode(qr_final)
-img_barcode = np.copy(thress)
-for barcode in barcodes:
-
-    (x, y, w, h) = barcode.rect
-    cv2.rectangle(img_barcode, (x, y), (x + w, y + h), (0, 0, 255), 2)
-    barcodeData = barcode.data.decode("utf-8")
-    barcodeType = barcode.type
-    # draw the barcode data and barcode type on the image
-    text = "{} ({})".format(barcodeData, barcodeType)
-    cv2.putText(img_barcode, text, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 
-    0.5, (0, 0, 255), 2)
-    # print the barcode type and data to the terminal
-    #print("[INFO] Found {} barcode: {}".format(barcodeType, barcodeData))
-
-cv2.imshow("barcode",img_barcode)
-'''

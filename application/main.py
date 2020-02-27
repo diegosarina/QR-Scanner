@@ -8,7 +8,7 @@ import cv2
 # Local application imports
 from functions import *
 
-cap = cv2.VideoCapture(-1)
+cap = cv2.VideoCapture(2)
 
 top = None
 bottom,rigth,orientation=None,None,None
@@ -65,8 +65,11 @@ while(True):
             M = updateCornerOr(orientation,getVerices(contornos, rigth, slope))
             
             O = updateCornerOr(orientation,getVerices(contornos, bottom, slope))
-
-            N = getIntersectionPoint(M[1], M[2], O[3], O[2]) #calculo del punto de interseccion N
+            try:
+                N = getIntersectionPoint(M[1], M[2], O[3], O[2]) #calculo del punto de interseccion N
+            except IntersPointError:
+                continue
+            
 
             vert_externos = np.array(([L[0], M[1], N, O[3]]),dtype=np.float32)
             
