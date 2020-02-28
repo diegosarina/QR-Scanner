@@ -17,6 +17,10 @@ CV_QR_WEST = 3
 OTSU_BINARIZATION = 0
 THRES_BINARIZATION = 1
 
+DEBUG_MODE_OFF = 0
+DEBUG_MODE_ON = 1
+
+
 def distancia(c1, c2):
 
     delta_x = np.absolute(c1[0] - c2[0])
@@ -225,8 +229,7 @@ def get_centros_de_masas(contornos):
 
 def get_marcadores_indice(contornos, herencia):
 
-    mark = 0
-    A, B, C = None, None, None
+    marks_candidates = []
     for i in range(len(contornos)):
         
         approx = cv2.approxPolyDP(contornos[i],cv2.arcLength(contornos[i],True)*0.02,True)
@@ -241,17 +244,19 @@ def get_marcadores_indice(contornos, herencia):
             if (herencia[0,k,2] != -1):
                 cc = cc+1
         
-            if cc>=5: 
-                if(mark==0):
-                    A = i
-                elif (mark==1):
-                    B=i
-                elif (mark==2):
-                    C=i
-                mark = mark+1
+            if cc>=5:
+                marks_candidates.append(i) 
     
-    return mark, A, B, C
+    return marks_candidates
 
+
+def find_correct_mark(marks_candidates):
+
+    A = marks_candidates[0]
+    B = marks_candidates[1]
+    C = marks_candidates[2]
+
+    return A, B, C
 class OffLineExeption(Exception):
     pass
 
@@ -386,3 +391,124 @@ def decode_qr(qr_codificado):
 
         
     return qr_Data, qr_Type
+
+
+def qr_decode(centro, DBG=0):
+    bordes = get_bordes(centro)
+
+    #APPROX SIMPLE -> SE QUEDA CON LOS PUNTOS MAS EXTERNOS DEL CONTORNO
+    #APPROX NONE -> DEVUELVE TODOS LOS PUNTOS
+    contornos, herencia = cv2.findContours(np.copy(bordes),cv2.RETR_TREE,cv2.CHAIN_APPROX_TC89_KCOS)
+
+    centros_de_masas = get_centros_de_masas(contornos)
+        
+    marks_candidates = get_marcadores_indice(contornos, herencia)
+
+    if len(marks_candidates)>=3: #marcadores descubiertos
+
+        A, B, C = find_correct_mark(marks_candidates)
+        area_A = cv2.contourArea(contornos[A])
+        area_B = cv2.contourArea(contornos[B])
+        area_C = cv2.contourArea(contornos[C])
+
+        area_promedio = (area_A + area_B + area_C) / 3
+
+        if not ((area_A > area_promedio * 0.8 and area_A < area_promedio * 1.2)
+            and (area_B > area_promedio * 0.8 and area_B < area_promedio * 1.2)
+            and (area_C > area_promedio * 0.8 and area_C < area_promedio * 1.2)):
+            return None
+        
+        try:
+            top, mediana_1, mediana_2 = get_offline(centros_de_masas, A, B, C)
+        except OffLineExeption:
+            return None
+        
+        dist = lineEquation(
+            centros_de_masas[mediana_1],
+            centros_de_masas[mediana_2],
+            centros_de_masas[top]
+        )
+        slope, align = lineSlope(
+            centros_de_masas[mediana_1],
+            centros_de_masas[mediana_2]
+        )
+
+        orientation, bottom, rigth = get_orientation(
+            align,
+            slope,
+            dist,
+            centros_de_masas,
+            mediana_1,
+            mediana_2
+        )
+
+        if((cv2.contourArea(contornos[top]) > 10) 
+            and (cv2.contourArea(contornos[rigth]) > 10) 
+            and (cv2.contourArea(contornos[bottom]) > 10)):
+                        
+            L = updateCornerOr(orientation,getVerices(contornos, top, slope))
+
+            M = updateCornerOr(orientation,getVerices(contornos, rigth, slope))
+            
+            O = updateCornerOr(orientation,getVerices(contornos, bottom, slope))
+            try:
+                N = getIntersectionPoint(M[1], M[2], O[3], O[2]) #calculo del punto de interseccion N 
+            except IntersPointError:
+                return None
+            
+            try:
+                pixel = centro[N[1],N[0]]
+            except:
+                return None
+
+            vert_externos = np.array(([L[0], M[1], N, O[3]]),dtype=np.float32)
+            
+            imagen_perspectiva_corregida = correccion_perspectiva(vert_externos,centro)
+
+            qr_binarizado = binarizado_imagen(imagen_perspectiva_corregida)
+
+            img_marcadores = plot_marcadores(
+                np.copy(centro), 
+                contornos,
+                top,
+                rigth,
+                bottom,
+                N
+            )
+
+            cv2.imshow("IMAGEN MARCADORES",img_marcadores)
+
+            traces = np.zeros((np.shape(centro)),dtype=np.uint8)
+            
+            if(DBG):
+            
+                cv2.drawContours(traces,contornos,top,(255,0,100),1)
+                cv2.drawContours(traces,contornos,rigth,(255,0,100),1)
+                cv2.drawContours(traces,contornos,bottom,(255,0,100),1)
+
+                plot_vertices(traces, L, M, O, N)
+                plot_lineas(traces, M, O, N)
+
+                orientaciones = {
+                    CV_QR_NORTH : "NORTE",
+                    CV_QR_SOUTH : "SUR",
+                    CV_QR_EAST : "ESTE",
+                    CV_QR_WEST : "OSTE",
+                }
+
+                cv2.putText(
+                    traces,  orientaciones[orientation],
+                    (20,30), cv2.FONT_HERSHEY_PLAIN, 
+                    1, (0,255,0), 1, 8
+                )
+                
+                
+                cv2.imshow("DBG", traces)
+
+            cv2.imshow("QR BINARIZADO", qr_binarizado)
+            qr_Data, qr_Type = decode_qr(qr_binarizado)
+            #print(f"Tipo {qr_Type}, Data: {qr_Data}")
+
+            return qr_Data
+
+        
