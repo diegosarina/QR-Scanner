@@ -1,10 +1,11 @@
 # Standard library imports
-
+import pdb
 
 # Third party imports
 import numpy as np
 import cv2
 import pyzbar.pyzbar as pyzbar
+import warnings
 # Local application imports
 
 
@@ -136,29 +137,22 @@ class IntersPointError(Exception):
     pass
 
 def getIntersectionPoint(a1,a2,b1,b2):
+    xdiff = (a2[0] - a1[0], b2[0] - b1[0])
+    ydiff = (a2[1] - a1[1], b2[1] - b1[1])
 
-    delta_a = a2 - a1
-    delta_b = b2 - b1
+    def det(a, b):
+        return a[0] * b[1] - a[1] * b[0]
 
-    m_a = delta_a[1] / delta_a[0]
-    m_b = delta_b[1] / delta_b[0]
+    div = det(xdiff, ydiff)
+    if div == 0:
+       raise IntersPointError('lines do not intersect')
 
-    M = np.array([[-m_a,1],[-m_b,1]])
-
-    try:
-        inversa_M = np.linalg.inv(M)
-    except np.linalg.LinAlgError:
-        raise IntersPointError
+    d = (det(a2,a1), det(b2,b1))
+    x = float(det(d, xdiff)) / div
+    y = float(det(d, ydiff)) / div
     
-    b_a = a1[1] - (m_a) * a1[0]
-    b_b = b1[1] - (m_b) * b1[0]
-
-    B = np.array([[b_a],[b_b]])
-
-    intersection_point = np.dot(inversa_M,B)
-
-    return np.int32(np.transpose(intersection_point))[0]
-
+    return np.int32([x, y])
+    
 
 
 def get_fondo_centro(frame, porcent_x, porcent_y):
@@ -393,7 +387,7 @@ def decode_qr(qr_codificado):
     return qr_Data, qr_Type
 
 
-def qr_decode(centro, DBG=0):
+def qr_decode(centro, DBG=0, binarization_mode=0):
     bordes = get_bordes(centro)
 
     #APPROX SIMPLE -> SE QUEDA CON LOS PUNTOS MAS EXTERNOS DEL CONTORNO
@@ -403,7 +397,7 @@ def qr_decode(centro, DBG=0):
     centros_de_masas = get_centros_de_masas(contornos)
         
     marks_candidates = get_marcadores_indice(contornos, herencia)
-
+    #pdb.set_trace()
     if len(marks_candidates)>=3: #marcadores descubiertos
 
         A, B, C = find_correct_mark(marks_candidates)
@@ -465,7 +459,7 @@ def qr_decode(centro, DBG=0):
             
             imagen_perspectiva_corregida = correccion_perspectiva(vert_externos,centro)
 
-            qr_binarizado = binarizado_imagen(imagen_perspectiva_corregida)
+            qr_binarizado = binarizado_imagen(imagen_perspectiva_corregida,binarization_mode)
 
             img_marcadores = plot_marcadores(
                 np.copy(centro), 
