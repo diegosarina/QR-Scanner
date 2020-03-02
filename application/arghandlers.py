@@ -4,15 +4,18 @@
 import cv2
 
 # Local application imports
-from functions import *
+from functions import ScannerComponent, qr_scanner, qr_decoder
 
 
-def video_handler(args):#
+def video_handler(args):
+    """
+    handler for video command
+    """
     verbose = args.verbose
     thresh = args.thresh
     continuous_detection = args.continuous
 
-    if(args.filename):
+    if args.filename:
         video_source = args.filename
         scanner_view = None
     else:
@@ -21,14 +24,14 @@ def video_handler(args):#
 
     cap = cv2.VideoCapture(video_source)
     qr_old_data = ''
-    
-    while(True):
-            
+
+    while True:
+
         ret, input_image = cap.read()
         if not ret:
             break
 
-        if(scanner_view):
+        if scanner_view:
             scanner_view.set_input_frame(input_image)
             objective_image = scanner_view.get_central_image()
             drawn_scanner = scanner_view.draw()
@@ -38,29 +41,33 @@ def video_handler(args):#
 
         qr_detected = qr_scanner(objective_image, thresh, verbose)
         if qr_detected:
+            cv2.imshow("QR Code Detected", qr_detected[0])
             qr_data = qr_decoder(qr_detected[0])
 
-            if(verbose):
+            if verbose:
                 cv2.imshow("Input Image", objective_image)
                 cv2.imshow("Placeholders", qr_detected[1])
-            
-            if(verbose or ((qr_old_data != qr_data) and qr_data)):
+
+            if qr_data and (qr_old_data != qr_data):
                 print(f"data: {qr_data}")
-                cv2.imshow("QR Code Detected", qr_detected[0])
-                qr_old_data = qr_data                    
- 
+                qr_old_data = qr_data
+
             if not continuous_detection:
                 break
-        
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break   
 
-    if continuous_detection or cv2.waitKey(0):           
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    if continuous_detection or cv2.waitKey(0):
         cap.release()
         cv2.destroyAllWindows()
 
 
 def image_handler(args):
+    """
+    handler for image command
+    """
+
     path_to_image = args.path
     verbose = args.verbose
     thresh = args.thresh
@@ -73,7 +80,7 @@ def image_handler(args):
             qr_data = qr_decoder(qr_detected[0])
             print(f"data: {qr_data}")
 
-            if(verbose):
+            if verbose:
                 cv2.imshow("Input Image", img)
                 cv2.imshow("Placeholders", qr_detected[1])
                 cv2.imshow("QR Code Detected", qr_detected[0])

@@ -20,7 +20,7 @@ DEBUG_MODE_OFF = 0
 DEBUG_MODE_ON = 1
 
 
-class IntersPointError(Exception):
+class PointIntersectionError(Exception):
     pass
 
 class OffLineError(Exception):
@@ -46,22 +46,22 @@ def line_slope(point_1, point_2):
     dy = point_2[1] - point_1[1]
     if dy:
         return (dy / dx), 1
-    
+
     return 0, 0
 
 
 def update_corner(c1, ref, baseline, corner):
     temp_dist = distance(c1, ref)
 
-    if(temp_dist > baseline):
+    if temp_dist > baseline:
         baseline = temp_dist
         corner = c1
         return baseline, corner
-    
-    return baseline, corner
-    
 
-def get_vertices(contours, c_id, slope):
+    return baseline, corner
+
+
+def get_vertices(contours, c_id):
     """
         A-----W-----B
         |           |
@@ -75,42 +75,36 @@ def get_vertices(contours, c_id, slope):
     C = [B[0], A[1] + box[3]]
     D = [A[0], C[1]]
 
-    W = [(A[0] + B[0]) / 2, (A[1])]
-    X = [B[0], (B[1] + C[1]) / 2]
-    Y = [(C[0] + D[0]) / 2, C[1]]
-    Z = [D[0], (D[1] + A[1]) / 2]
-
     dmax = np.array([0, 0, 0, 0])
 
     M0, M1, M2, M3 = [0,0], [0,0], [0,0], [0,0]
-    
+
     half_x = (A[0] + B[0]) / 2
     half_y = (A[1] + D[1]) / 2
-    
-    for i in range(len(contours[c_id])):
 
-        if((contours[c_id][i][0][0] < half_x) and (contours[c_id][i][0][1] <= half_y)):
-            dmax[2], M0 = update_corner(contours[c_id][i][0], C, dmax[2], M0)
+    for points in contours[c_id]:
+        if((points[0][0] < half_x) and (points[0][1] <= half_y)):
+            dmax[2], M0 = update_corner(points[0], C, dmax[2], M0)
 
-        elif((contours[c_id][i][0][0] >= half_x) and (contours[c_id][i][0][1] < half_y)):
-            dmax[3], M1 = update_corner(contours[c_id][i][0], D, dmax[3], M1)
-        
-        elif((contours[c_id][i][0][0] > half_x) and (contours[c_id][i][0][1] >= half_y)):
-            dmax[0], M2 = update_corner(contours[c_id][i][0], A, dmax[0], M2)
+        elif((points[0][0] >= half_x) and (points[0][1] < half_y)):
+            dmax[3], M1 = update_corner(points[0], D, dmax[3], M1)
 
-        elif((contours[c_id][i][0][0] <= half_x) and (contours[c_id][i][0][1] > half_y)):
-            dmax[1], M3 = update_corner(contours[c_id][i][0], B, dmax[1], M3)
+        elif((points[0][0] > half_x) and (points[0][1] >= half_y)):
+            dmax[0], M2 = update_corner(points[0], A, dmax[0], M2)
+
+        elif((points[0][0] <= half_x) and (points[0][1] > half_y)):
+            dmax[1], M3 = update_corner(points[0], B, dmax[1], M3)
 
     return [M0, M1, M2, M3]
 
 
-def updateCornerOr(orientation, vertices):
-    
+def update_corner_orientation(orientation, vertices):
+
     return {
         QR_NORTH: [vertices[0], vertices[1], vertices[2], vertices[3]],
         QR_EAST: [vertices[1], vertices[2], vertices[3], vertices[0]],
         QR_SOUTH: [vertices[2], vertices[3], vertices[0], vertices[1]],
-        QR_WEST: [vertices[3], vertices[0],vertices[1],vertices[2]]
+        QR_WEST: [vertices[3], vertices[0], vertices[1], vertices[2]]
     }[orientation]
 
 
@@ -123,12 +117,12 @@ def intersection_between_two_lines(line1_p1, line1_p2, line2_p1, line2_p2):
 
     determinant = det(delta_x, delta_y)
     if not determinant:
-       raise IntersPointError('lines do not intersect')
+        raise PointIntersectionError('lines do not intersect')
 
-    d = (det(line1_p2,line1_p1), det(line2_p2,line2_p1))
+    d = (det(line1_p2, line1_p1), det(line2_p2, line2_p1))
     x = float(det(d, delta_x)) / determinant
     y = float(det(d, delta_y)) / determinant
-    
+
     return np.int32([x, y])
 
 
@@ -139,43 +133,43 @@ def image_edges(frame):
 
 
 def mass_center(contours):
-    mass_centers = np.empty([len(contours),2])
-    for i in range(len(contours)):
-        moments = cv2.moments(contours[i])
+    mass_centers = np.empty([len(contours), 2])
+    for i, contour in enumerate(contours):
+        moments = cv2.moments(contour)
         if moments["m00"]:
-            mass_centers[i,:]= (
+            mass_centers[i, :] = (
                 moments["m10"] / moments["m00"],
                 moments["m01"] / moments["m00"]
-            )   
+            )
         else:
-            mass_centers[i,:] = (0,0)
-             
+            mass_centers[i, :] = (0, 0)
+
     return mass_centers
 
 
 def search_candidate_markers(contours, hierarchy):
     marks_candidates = []
 
-    for i in range(len(contours)):
+    for i, contour in enumerate(contours):
         approx = cv2.approxPolyDP(
-            contours[i],
-            cv2.arcLength(contours[i],True)*0.02,
+            contour,
+            cv2.arcLength(contour, True) * 0.02,
             True
         )
         if len(approx) == 4:
-            k=i
-            cc=0
-            
-            while (hierarchy[0,k,2] != -1):
-                k = hierarchy[0,k,2]
-                cc = cc+1
-        
-            if (hierarchy[0,k,2] != -1):
-                cc = cc+1
-        
-            if cc>=5:
-                marks_candidates.append(i) 
-    
+            k = i
+            cc = 0
+
+            while (hierarchy[0, k, 2] != -1):
+                k = hierarchy[0, k, 2]
+                cc += 1
+
+            if (hierarchy[0, k, 2] != -1):
+                cc += 1
+
+            if cc >= 5:
+                marks_candidates.append(i)
+
     return marks_candidates
 
 
@@ -187,237 +181,251 @@ def find_correct_mark(marks_candidates):
 
 
 def find_offline_point(mass_centers, A, B, C):
-    AB = distance(mass_centers[A,:], mass_centers[B,:])
-    BC = distance(mass_centers[B,:], mass_centers[C,:])
-    CA = distance(mass_centers[C,:], mass_centers[A,:])
+    AB = distance(mass_centers[A, :], mass_centers[B, :])
+    BC = distance(mass_centers[B, :], mass_centers[C, :])
+    CA = distance(mass_centers[C, :], mass_centers[A, :])
 
-    if((AB > BC) and (AB > CA)):
+    if CA < AB > BC:
         offline_point = C
         return offline_point, A, B
-    elif ((CA > AB) and (CA > BC)):
+    if BC < CA > AB:
         offline_point = B
         return offline_point, A, C
-    elif((BC > AB) and (BC > CA)):
+    if CA < BC > AB:
         offline_point = A
         return offline_point, B, C
-    else:
-        raise OffLineError
+
+    raise OffLineError
 
 
 def get_orientation(align, slope, dist, mass_centers, mediana_1, mediana_2):
     if not align:
         botton = mediana_1
         rigth = mediana_2
-    elif(slope < 0 and dist < 0):
-        orientation= QR_NORTH
-        if(mass_centers[mediana_1][1] > mass_centers[mediana_2][1]):
+    elif slope < 0 and dist < 0:
+        orientation = QR_NORTH
+        if mass_centers[mediana_1][1] > mass_centers[mediana_2][1]:
             botton = mediana_1
             rigth = mediana_2
         else:
             botton = mediana_2
-            rigth = mediana_1       
-    elif(slope>0 and dist<0):
-        orientation= QR_EAST
-        if(mass_centers[mediana_1][0] > mass_centers[mediana_2][0]):
+            rigth = mediana_1
+    elif dist < 0 < slope:
+        orientation = QR_EAST
+        if mass_centers[mediana_1][0] > mass_centers[mediana_2][0]:
             botton = mediana_2
             rigth = mediana_1
         else:
             botton = mediana_1
             rigth = mediana_2
-    elif(slope<0 and dist>0):
-        orientation= QR_SOUTH 
-        if(mass_centers[mediana_1][1] > mass_centers[mediana_2][1]):
+    elif slope < 0 < dist:
+        orientation = QR_SOUTH
+        if mass_centers[mediana_1][1] > mass_centers[mediana_2][1]:
             botton = mediana_2
             rigth = mediana_1
         else:
             botton = mediana_1
             rigth = mediana_2
-    elif(slope>0 and dist >0):
+    elif slope > 0 and dist > 0:
         orientation = QR_WEST
-        if(mass_centers[mediana_1][0] > mass_centers[mediana_2][0]):
+        if mass_centers[mediana_1][0] > mass_centers[mediana_2][0]:
             botton = mediana_1
             rigth = mediana_2
         else:
             botton = mediana_2
-            rigth = mediana_1    
+            rigth = mediana_1
 
     return orientation, botton, rigth
 
 
-def correccion_perspectiva(vertices, imagen):
+def perspective_correction(vertices, image):
 
-    dst = np.array(((40,40),(440,40),(440,440),(40,440)),dtype=np.float32)
-    warp_matrix = cv2.getPerspectiveTransform(vertices,dst)
-    warped = cv2.warpPerspective(imagen, warp_matrix,(500,500),borderMode=cv2.BORDER_REPLICATE)
-    imagen = cv2.copyMakeBorder(warped,10,10,10,10,cv2.BORDER_CONSTANT,value=(255,255,255))
-    
-    return imagen
-    
+    dst = np.array(((40, 40), (440, 40), (440, 440), (40, 440)), dtype=np.float32)
+    warp_matrix = cv2.getPerspectiveTransform(vertices, dst)
+    warped = cv2.warpPerspective(
+        image,
+        warp_matrix,
+        (500, 500),
+        borderMode=cv2.BORDER_REPLICATE
+    )
+    image = cv2.copyMakeBorder(
+        warped,
+        10, 10, 10, 10,
+        cv2.BORDER_CONSTANT,
+        value=(255, 255, 255)
+    )
+    return image
 
-def binarizado_imagen(imagen, thresh=-1):
 
-    if(thresh == -1):
+def binarize_image(image, thresh=-1):
+
+    if thresh == -1:
         _, otsu = cv2.threshold(
-            cv2.cvtColor(imagen,cv2.COLOR_BGR2GRAY),
-            0,255,
+            cv2.cvtColor(image, cv2.COLOR_BGR2GRAY),
+            0, 255,
             cv2.THRESH_BINARY+cv2.THRESH_OTSU
         )
         return otsu
-    
+
     _, binary = cv2.threshold(
-        cv2.cvtColor(imagen,cv2.COLOR_BGR2GRAY),
-        thresh,255,
+        cv2.cvtColor(image, cv2.COLOR_BGR2GRAY),
+        thresh, 255,
         cv2.THRESH_BINARY
     )
     return binary
 
 
-def plot_marcadores(imagen, contornos, top, rigth, bottom, N, tickness=1):
+def plot_markers(image, contours, top, rigth, bottom, N, tickness=1):
 
-    cv2.drawContours(imagen, contornos, top, (255, 200, 0), tickness)
-    cv2.drawContours(imagen, contornos, rigth, (0, 0, 255), tickness)
-    cv2.drawContours(imagen, contornos, bottom, (255, 0, 100), tickness)
+    cv2.drawContours(image, contours, top, (255, 200, 0), tickness)
+    cv2.drawContours(image, contours, rigth, (0, 0, 255), tickness)
+    cv2.drawContours(image, contours, bottom, (255, 0, 100), tickness)
 
-    return imagen
-
-
-def plot_vertices(imagen, L, M, O, N):
-
-    cv2.circle(imagen, tuple(L[0]), 2, (255, 255, 0), -1, 8, 0)
-    cv2.circle(imagen, tuple(L[1]), 2, (0, 255, 0), -1, 8, 0)
-    cv2.circle(imagen, tuple(L[2]), 2, (0, 0, 255), -1, 8, 0)
-    cv2.circle(imagen, tuple(L[3]), 2, (128, 128, 128), -1, 8, 0)
-
-    cv2.circle(imagen, tuple(M[0]), 2, (255, 255, 0), -1, 8, 0)
-    cv2.circle(imagen, tuple(M[1]), 2, (0, 255, 0), -1, 8, 0)
-    cv2.circle(imagen, tuple(M[2]), 2, (0, 0, 255), -1, 8, 0)
-    cv2.circle(imagen, tuple(M[3]), 2, (128, 128, 128), -1, 8, 0)
-
-    cv2.circle(imagen, tuple(O[0]), 2, (255, 255, 0), -1, 8, 0)
-    cv2.circle(imagen, tuple(O[1]), 2, (0, 255, 0), -1, 8, 0)
-    cv2.circle(imagen, tuple(O[2]), 2, (0, 0, 255), -1, 8, 0)
-    cv2.circle(imagen, tuple(O[3]), 2, (128, 128, 128), -1, 8, 0)
-
-    cv2.circle(imagen, tuple(N), 5, (70, 252, 252), -1, 8, 0)
+    return image
 
 
-def plot_lineas(imagen, M, O, N):
-    
-    cv2.line(imagen, tuple(M[1]), tuple(N), (0, 0, 255), 1, 8, 0)
-    cv2.line(imagen, tuple(O[3]), tuple(N), (0, 0, 255), 1, 8, 0)
+def plot_vertices(image, L, M, O, N):
+    cv2.circle(image, tuple(L[0]), 2, (255, 255, 0), -1, 8, 0)
+    cv2.circle(image, tuple(L[1]), 2, (0, 255, 0), -1, 8, 0)
+    cv2.circle(image, tuple(L[2]), 2, (0, 0, 255), -1, 8, 0)
+    cv2.circle(image, tuple(L[3]), 2, (128, 128, 128), -1, 8, 0)
+
+    cv2.circle(image, tuple(M[0]), 2, (255, 255, 0), -1, 8, 0)
+    cv2.circle(image, tuple(M[1]), 2, (0, 255, 0), -1, 8, 0)
+    cv2.circle(image, tuple(M[2]), 2, (0, 0, 255), -1, 8, 0)
+    cv2.circle(image, tuple(M[3]), 2, (128, 128, 128), -1, 8, 0)
+
+    cv2.circle(image, tuple(O[0]), 2, (255, 255, 0), -1, 8, 0)
+    cv2.circle(image, tuple(O[1]), 2, (0, 255, 0), -1, 8, 0)
+    cv2.circle(image, tuple(O[2]), 2, (0, 0, 255), -1, 8, 0)
+    cv2.circle(image, tuple(O[3]), 2, (128, 128, 128), -1, 8, 0)
+
+    cv2.circle(image, tuple(N), 5, (70, 252, 252), -1, 8, 0)
+
+
+def plot_lines(image, M, O, N):
+    cv2.line(image, tuple(M[1]), tuple(N), (0, 0, 255), 1, 8, 0)
+    cv2.line(image, tuple(O[3]), tuple(N), (0, 0, 255), 1, 8, 0)
 
 
 def qr_scanner(image, thresh=-1, verbose=0):
     ret = ()
-    bordes = image_edges(image)
+    edges = image_edges(image)
 
     #APPROX SIMPLE -> SE QUEDA CON LOS PUNTOS MAS EXTERNOS DEL CONTORNO
     #APPROX NONE -> DEVUELVE TODOS LOS PUNTOS
-    contornos, herencia = cv2.findContours(
-        np.copy(bordes),
+    contours, herencia = cv2.findContours(
+        np.copy(edges),
         cv2.RETR_TREE,
         cv2.CHAIN_APPROX_TC89_KCOS
     )
-    centros_de_masas = mass_center(contornos)
-    marks_candidates = search_candidate_markers(contornos, herencia)
-    
-    if len(marks_candidates)>=3: #marcadores descubiertos
+    mass_centers = mass_center(contours)
+    marks_candidates = search_candidate_markers(contours, herencia)
+
+    if len(marks_candidates) >= 3: #marcadores descubiertos
 
         A, B, C = find_correct_mark(marks_candidates)
-        area_A = cv2.contourArea(contornos[A])
-        area_B = cv2.contourArea(contornos[B])
-        area_C = cv2.contourArea(contornos[C])
+        area_A = cv2.contourArea(contours[A])
+        area_B = cv2.contourArea(contours[B])
+        area_C = cv2.contourArea(contours[C])
 
-        area_promedio = (area_A + area_B + area_C) / 3
+        average_area = (area_A + area_B + area_C) / 3
 
-        if not ((area_A > area_promedio * 0.8 and area_A < area_promedio * 1.2)
-            and (area_B > area_promedio * 0.8 and area_B < area_promedio * 1.2)
-            and (area_C > area_promedio * 0.8 and area_C < area_promedio * 1.2)):
-            return None
-        
+        if not ((average_area * 0.8 < area_A < average_area * 1.2)
+                and (average_area * 0.8 < area_B < average_area * 1.2)
+                and (average_area * 0.8 < area_C < average_area * 1.2)):
+            return
+
         try:
-            top, mediana_1, mediana_2 = find_offline_point (centros_de_masas, A, B, C)
+            top, mediana_1, mediana_2 = find_offline_point(mass_centers, A, B, C)
         except OffLineError:
-            return None
-        
+            return
+
         dist = distance_line_to_point(
-            centros_de_masas[mediana_1],
-            centros_de_masas[mediana_2],
-            centros_de_masas[top]
+            mass_centers[mediana_1],
+            mass_centers[mediana_2],
+            mass_centers[top]
         )
         slope, align = line_slope(
-            centros_de_masas[mediana_1],
-            centros_de_masas[mediana_2]
+            mass_centers[mediana_1],
+            mass_centers[mediana_2]
         )
 
         orientation, bottom, rigth = get_orientation(
             align,
             slope,
             dist,
-            centros_de_masas,
+            mass_centers,
             mediana_1,
             mediana_2
         )
 
-        if((cv2.contourArea(contornos[top]) > 10) 
-            and (cv2.contourArea(contornos[rigth]) > 10) 
-            and (cv2.contourArea(contornos[bottom]) > 10)):
-                        
-            L = updateCornerOr(orientation,get_vertices(contornos, top, slope))
+        if (cv2.contourArea(contours[top]) > 10
+                and cv2.contourArea(contours[rigth]) > 10
+                and cv2.contourArea(contours[bottom]) > 10):
 
-            M = updateCornerOr(orientation,get_vertices(contornos, rigth, slope))
-            
-            O = updateCornerOr(orientation,get_vertices(contornos, bottom, slope))
+            L = update_corner_orientation(
+                orientation,
+                get_vertices(contours, top)
+            )
+            M = update_corner_orientation(
+                orientation,
+                get_vertices(contours, rigth)
+            )
+            O = update_corner_orientation(
+                orientation,
+                get_vertices(contours, bottom)
+            )
             try:
-                N = intersection_between_two_lines(M[1], M[2], O[3], O[2]) #calculo del punto de interseccion N 
-            except IntersPointError:
+                N = intersection_between_two_lines(M[1], M[2], O[3], O[2])
+            except PointIntersectionError:
                 return None
-            
             try:
-                pixel = image[N[1],N[0]]
+                pixel = image[N[1], N[0]]
             except:
-                return None
+                return
 
-            vert_externos = np.array(([L[0], M[1], N, O[3]]),dtype=np.float32)
-            
-            imagen_perspectiva_corregida = correccion_perspectiva(vert_externos,image)
+            external_vertices = np.array(([L[0], M[1], N, O[3]]), dtype=np.float32)
+            corrected_perspective = perspective_correction(
+                external_vertices,
+                image
+            )
 
             ret = (
-                binarizado_imagen(
-                    imagen_perspectiva_corregida,
+                binarize_image(
+                    corrected_perspective,
                     thresh
                 ),
-                plot_marcadores(
-                    np.copy(image), 
-                    contornos,
-                    top,
-                    rigth,
-                    bottom,
-                    N,
+                plot_markers(
+                    np.copy(image),
+                    contours,
+                    top, rigth,
+                    bottom, N,
                     tickness=3
                 )
-            ) 
-           
-            if(verbose):
-                traces = np.zeros((np.shape(image)),dtype=np.uint8)
-                cv2.drawContours(traces,contornos,top,(255,0,100),1)
-                cv2.drawContours(traces,contornos,rigth,(255,0,100),1)
-                cv2.drawContours(traces,contornos,bottom,(255,0,100),1)
+            )
+
+            if verbose:
+                traces = np.zeros((np.shape(image)), dtype=np.uint8)
+                cv2.drawContours(traces, contours, top, (255, 0, 100), 1)
+                cv2.drawContours(traces, contours, rigth, (255, 0, 100), 1)
+                cv2.drawContours(traces, contours, bottom, (255, 0, 100), 1)
 
                 plot_vertices(traces, L, M, O, N)
-                plot_lineas(traces, M, O, N)
+                plot_lines(traces, M, O, N)
 
-                orientaciones = {
-                    QR_NORTH : "NORTE",
-                    QR_SOUTH : "SUR",
-                    QR_EAST : "ESTE",
-                    QR_WEST : "OSTE",
+                orientations = {
+                    QR_NORTH : "NORTH",
+                    QR_SOUTH : "SOUTH",
+                    QR_EAST : "EAST",
+                    QR_WEST : "WEST",
                 }
-
                 cv2.putText(
-                    traces,  orientaciones[orientation],
-                    (20,30), cv2.FONT_HERSHEY_PLAIN, 
-                    1, (0,255,0), 1, 8
+                    traces,
+                    orientations[orientation],
+                    (20, 30),
+                    cv2.FONT_HERSHEY_PLAIN,
+                    1, (0, 255, 0), 1, 8
                 )
                 cv2.imshow("traces", traces)
 
@@ -430,15 +438,16 @@ def qr_decoder(qr_codificado):
 
     for qr in qrs:
         decoded_data = qr.data.decode("utf-8")
-        
+
     return decoded_data
+
 
 class ScannerComponent():
     def __init__(self, line_speed, percentage):
         self._percentage = percentage
         self._line_speed = line_speed
         self._iter = 0
-    
+
     def set_input_frame(self, frame):
         middle_x = int(frame.shape[1] / 2)
         middle_y = int(frame.shape[0] / 2)
@@ -450,7 +459,7 @@ class ScannerComponent():
         self.max_x = middle_x + delta_x
         self.min_y = middle_y - delta_y
         self.max_y = middle_y + delta_y
-        
+
         self.frame = frame
         self._central_image = np.copy(
             frame[
