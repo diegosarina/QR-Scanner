@@ -61,7 +61,7 @@ def update_corner(c1, ref, baseline, corner):
     return baseline, corner
 
 
-def get_vertices(contours, c_id):
+def get_vertices(contour, image, draw=False):
     """
         A-----W-----B
         |           |
@@ -69,32 +69,46 @@ def get_vertices(contours, c_id):
         |           |
         D-----Y-----C
     """
-    box = cv2.boundingRect(contours[c_id])
+    box = cv2.boundingRect(contour)
     A = box[0:2]
     B = [A[0] + box[2], A[1]]
     C = [B[0], A[1] + box[3]]
     D = [A[0], C[1]]
 
     dmax = np.array([0, 0, 0, 0])
-
-    M0, M1, M2, M3 = [0,0], [0,0], [0,0], [0,0]
-
+    M0, M1, M2, M3 = [0, 0], [0, 0], [0, 0], [0, 0]
     half_x = (A[0] + B[0]) / 2
     half_y = (A[1] + D[1]) / 2
+    if draw:
+        image[int(half_y), int(half_x), :] = (0, 0, 255)
+        vertices = [A, B, C, D]
+        for p in vertices:
+            image[p[1], p[0], :] = (255, 0, 0)
 
-    for points in contours[c_id]:
-        if((points[0][0] < half_x) and (points[0][1] <= half_y)):
-            dmax[2], M0 = update_corner(points[0], C, dmax[2], M0)
+    for point in contour:
+        if draw:
+            image[point[0][1], point[0][0], :] = (0, 255, 0)
+            vertices = [M0, M1, M2, M3]
+            for p in vertices:
+                image[p[1], p[0], :] = (0, 0, 255)
+            cv2.imshow('get_vertices', image)
+            if cv2.waitKey(0) & 0xFF == ord('q'):
+                draw = False
 
-        elif((points[0][0] >= half_x) and (points[0][1] < half_y)):
-            dmax[3], M1 = update_corner(points[0], D, dmax[3], M1)
+        if (point[0][0] < half_x) and (point[0][1] <= half_y):
+            dmax[2], M0 = update_corner(point[0], C, dmax[2], M0)
 
-        elif((points[0][0] > half_x) and (points[0][1] >= half_y)):
-            dmax[0], M2 = update_corner(points[0], A, dmax[0], M2)
+        elif (point[0][0] >= half_x) and (point[0][1] < half_y):
+            dmax[3], M1 = update_corner(point[0], D, dmax[3], M1)
 
-        elif((points[0][0] <= half_x) and (points[0][1] > half_y)):
-            dmax[1], M3 = update_corner(points[0], B, dmax[1], M3)
+        elif (point[0][0] > half_x) and (point[0][1] >= half_y):
+            dmax[0], M2 = update_corner(point[0], A, dmax[0], M2)
 
+        elif (point[0][0] <= half_x) and (point[0][1] > half_y):
+            dmax[1], M3 = update_corner(point[0], B, dmax[1], M3)
+
+    if draw:
+        cv2.destroyWindow('get_vertices')
     return [M0, M1, M2, M3]
 
 
@@ -308,7 +322,7 @@ def plot_lines(image, M, O, N):
     cv2.line(image, tuple(O[3]), tuple(N), (0, 0, 255), 1, 8, 0)
 
 
-def qr_scanner(image, thresh=-1, verbose=0):
+def qr_scanner(image, thresh=-1, verbose=False):
     ret = ()
     edges = image_edges(image)
 
@@ -363,18 +377,18 @@ def qr_scanner(image, thresh=-1, verbose=0):
         if (cv2.contourArea(contours[top]) > 10
                 and cv2.contourArea(contours[rigth]) > 10
                 and cv2.contourArea(contours[bottom]) > 10):
-
+            image_point = np.copy(image)
             L = update_corner_orientation(
                 orientation,
-                get_vertices(contours, top)
+                get_vertices(contours[top], image_point, verbose)
             )
             M = update_corner_orientation(
                 orientation,
-                get_vertices(contours, rigth)
+                get_vertices(contours[rigth], image_point, verbose)
             )
             O = update_corner_orientation(
                 orientation,
-                get_vertices(contours, bottom)
+                get_vertices(contours[bottom], image_point, verbose)
             )
             try:
                 N = intersection_between_two_lines(M[1], M[2], O[3], O[2])

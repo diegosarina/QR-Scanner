@@ -1,6 +1,7 @@
 # Standard library imports
 
 # Third party imports
+import numpy as np
 import cv2
 
 # Local application imports
