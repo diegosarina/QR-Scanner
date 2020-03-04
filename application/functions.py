@@ -1,384 +1,518 @@
 # Standard library imports
 
-
 # Third party imports
 import numpy as np
 import cv2
 import pyzbar.pyzbar as pyzbar
+
 # Local application imports
 
-
 # Constants variables
-CV_QR_NORTH = 0
-CV_QR_EAST = 1
-CV_QR_SOUTH = 2
-CV_QR_WEST = 3
+QR_NORTH = 0
+QR_EAST = 1
+QR_SOUTH = 2
+QR_WEST = 3
 
-def distancia(c1, c2):
+OTSU_BINARIZATION = 0
+THRES_BINARIZATION = 1
 
-    delta_x = np.absolute(c1[0] - c2[0])
-    delta_y = np.absolute(c1[1] - c2[1])
-
-    return np.sqrt(delta_x * delta_x + delta_y * delta_y)
+DEBUG_MODE_OFF = 0
+DEBUG_MODE_ON = 1
 
 
-def lineEquation(c1, c2, c3):
+class PointIntersectionError(Exception):
+    pass
 
-    m = (c2[1] - c1[1]) / (c2[0] - c1[0])
+class OffLineError(Exception):
+    pass
+
+
+def distance(point_1, point_2):
+    return np.linalg.norm(point_1 - point_2)
+
+
+def distance_line_to_point(line_p1, line_p2, p):
+    m = (line_p2[1] - line_p1[1]) / (line_p2[0] - line_p1[0])
     a = -m
     b = 1.0
-    c = (m * c1[0]) - c1[1]
-    pdist = (a * c3[0] + b * c3[1] + c) / np.sqrt((a * a)+(b * b))
+    c = (m * line_p1[0]) - line_p1[1]
+    dist = (a * p[0] + b * p[1] + c) / np.sqrt((a * a)+(b * b))
 
-    return pdist
+    return dist
 
 
-def lineSlope(c1, c2):
-    
-    dx = c2[0] - c1[0]
-    dy = c2[1] - c1[1]
+def line_slope(point_1, point_2):
+    dx = point_2[0] - point_1[0]
+    dy = point_2[1] - point_1[1]
+    if dy:
+        return (dy / dx), 1
 
-    if(dy != 0):
-        
-        return(dy / dx), 1
-    
     return 0, 0
 
 
-def updateCorner(c1, ref, baseline, corner):
+def update_corner(c1, ref, baseline, corner):
+    temp_dist = distance(c1, ref)
 
-    temp_dist = distancia(c1, ref)
-
-    if(temp_dist > baseline):
-        
+    if temp_dist > baseline:
         baseline = temp_dist
         corner = c1
-        
         return baseline, corner
-    
-    return baseline, corner
-    
 
-def getVerices(contornos, c_id, slope):
-    
-    box = cv2.boundingRect(contornos[c_id])
+    return baseline, corner
+
+
+def get_vertices(contour, image, draw=False):
+    """
+        A-----W-----B
+        |           |
+        Z           X
+        |           |
+        D-----Y-----C
+    """
+    box = cv2.boundingRect(contour)
     A = box[0:2]
     B = [A[0] + box[2], A[1]]
     C = [B[0], A[1] + box[3]]
     D = [A[0], C[1]]
 
-    W = [(A[0] + B[0]) / 2, (A[1])]
-    X = [B[0], (B[1] + C[1]) / 2]
-    Y = [(C[0] + D[0]) / 2, C[1]]
-    Z = [D[0], (D[1] + A[1]) / 2]
-
     dmax = np.array([0, 0, 0, 0])
+    M0, M1, M2, M3 = [0, 0], [0, 0], [0, 0], [0, 0]
+    half_x = (A[0] + B[0]) / 2
+    half_y = (A[1] + D[1]) / 2
+    if draw:
+        image[int(half_y), int(half_x), :] = (0, 0, 255)
+        vertices = [A, B, C, D]
+        for p in vertices:
+            image[p[1], p[0], :] = (255, 0, 0)
 
-    M0, M1, M2, M3 = [0,0], [0,0], [0,0], [0,0]
+    for point in contour:
+        if draw:
+            image[point[0][1], point[0][0], :] = (0, 255, 0)
+            vertices = [M0, M1, M2, M3]
+            for p in vertices:
+                image[p[1], p[0], :] = (0, 0, 255)
+            cv2.imshow('get_vertices', image)
+            if cv2.waitKey(0) & 0xFF == ord('q'):
+                draw = False
 
-    if(slope > 5 or slope < -5):
-        
-        for i in range(len(contornos[c_id])):
-            pd1 = lineEquation(C, A, contornos[c_id][i][0])
-            pd2 = lineEquation(B, D, contornos[c_id][i][0])
-        
-            if((pd1 >= 0.0) and (pd2 > 0.0)):
-                dmax[1], M1 = updateCorner(contornos[c_id][i][0], W, dmax[1], M1)
-            
-            elif ((pd1 > 0.0) and (pd2 <= 0.0)):
-                dmax[2], M2 = updateCorner(contornos[c_id][i][0], X, dmax[2], M2)
+        if (point[0][0] < half_x) and (point[0][1] <= half_y):
+            dmax[2], M0 = update_corner(point[0], C, dmax[2], M0)
 
-            elif ((pd1 <= 0.0) and (pd2 < 0.0)):
-                dmax[3], M3 = updateCorner(contornos[c_id][i][0], Y, dmax[3], M3)
-            
-            elif ((pd1 < 0.0) and (pd2 >= 0.0)):
-                dmax[0], M0 = updateCorner(contornos[c_id][i][0], Z, dmax[0], M0)
+        elif (point[0][0] >= half_x) and (point[0][1] < half_y):
+            dmax[3], M1 = update_corner(point[0], D, dmax[3], M1)
 
-    else:
-        half_x = (A[0] + B[0]) / 2
-        half_y = (A[1] + D[1]) / 2
-        
-        for i in range(len(contornos[c_id])):
+        elif (point[0][0] > half_x) and (point[0][1] >= half_y):
+            dmax[0], M2 = update_corner(point[0], A, dmax[0], M2)
 
-            if((contornos[c_id][i][0][0] < half_x) and (contornos[c_id][i][0][1] <= half_y)):
-                dmax[2], M0 = updateCorner(contornos[c_id][i][0], C, dmax[2], M0)
+        elif (point[0][0] <= half_x) and (point[0][1] > half_y):
+            dmax[1], M3 = update_corner(point[0], B, dmax[1], M3)
 
-            elif((contornos[c_id][i][0][0] >= half_x) and (contornos[c_id][i][0][1] < half_y)):
-                dmax[3], M1 = updateCorner(contornos[c_id][i][0], D, dmax[3], M1)
-            
-            elif((contornos[c_id][i][0][0] > half_x) and (contornos[c_id][i][0][1] >= half_y)):
-                dmax[0], M2 = updateCorner(contornos[c_id][i][0], A, dmax[0], M2)
-
-            elif((contornos[c_id][i][0][0] <= half_x) and (contornos[c_id][i][0][1] > half_y)):
-                dmax[1], M3 = updateCorner(contornos[c_id][i][0], B, dmax[1], M3)
-
+    if draw:
+        cv2.destroyWindow('get_vertices')
     return [M0, M1, M2, M3]
 
 
-def updateCornerOr(orientation, verticesIN):
-    
+def update_corner_orientation(orientation, vertices):
+
     return {
-        CV_QR_NORTH: [verticesIN[0], verticesIN[1], verticesIN[2], verticesIN[3]],
-        CV_QR_EAST: [verticesIN[1], verticesIN[2], verticesIN[3], verticesIN[0]],
-        CV_QR_SOUTH: [verticesIN[2], verticesIN[3], verticesIN[0], verticesIN[1]],
-        CV_QR_WEST: [verticesIN[3], verticesIN[0],verticesIN[1],verticesIN[2]]
+        QR_NORTH: [vertices[0], vertices[1], vertices[2], vertices[3]],
+        QR_EAST: [vertices[1], vertices[2], vertices[3], vertices[0]],
+        QR_SOUTH: [vertices[2], vertices[3], vertices[0], vertices[1]],
+        QR_WEST: [vertices[3], vertices[0], vertices[1], vertices[2]]
     }[orientation]
 
 
-def cross(v1,v2):
+def intersection_between_two_lines(line1_p1, line1_p2, line2_p1, line2_p2):
+    delta_x = (line1_p2[0] - line1_p1[0], line2_p2[0] - line2_p1[0])
+    delta_y = (line1_p2[1] - line1_p1[1], line2_p2[1] - line2_p1[1])
 
-    return v1[0] * v2[1] - v1[1] * v2[0]
+    def det(a, b):
+        return a[0] * b[1] - a[1] * b[0]
 
+    determinant = det(delta_x, delta_y)
+    if not determinant:
+        raise PointIntersectionError('lines do not intersect')
 
-def getIntersectionPoint(a1, a2, b1, b2):
+    d = (det(line1_p2, line1_p1), det(line2_p2, line2_p1))
+    x = float(det(d, delta_x)) / determinant
+    y = float(det(d, delta_y)) / determinant
 
-    p = a1
-    q = b1 
-    r = (a2-a1)
-    s = (b2-b1)
-
-    if not cross(r,s):
-        return int(0)
-    
-    t = cross(q-p,s)/cross(r,s)
-    intersection = p + t*r
-    return np.array((int(intersection[0]), int(intersection[1])), dtype=np.int32)
+    return np.int32([x, y])
 
 
-def get_fondo_centro(frame, porcent_x, porcent_y):
-    
-    centro_x = int(frame.shape[1] / 2)
-    centro_y = int(frame.shape[0] / 2)
-
-    delta_x = int((frame.shape[1] * porcent_x) / 2)
-    delta_y = int((frame.shape[0] * porcent_y) / 2) 
-
-
-    fondo = np.copy(frame)
-    fondo = cv2.GaussianBlur(fondo,(25,25),5)
-    
-    centro = np.copy(frame[centro_y - delta_y : centro_y + delta_y, centro_x - delta_x : centro_x + delta_x])
-    fondo[centro_y - delta_y : centro_y + delta_y, centro_x - delta_x : centro_x + delta_x] = centro
-    
-    p1 = (centro_x - delta_x, centro_y - delta_y)
-    p2 = (centro_x + delta_x, centro_y + delta_y)
-
-    return fondo, centro, p1, p2
-
-
-def decorador(frame, iterator, p1, p2):
-    #p1 -> is the top left point
-    #p2 -> is the bottom rigth point
-
-    rectangle_color = (169, 169, 172)
-    line_color = (0, 0, 255)
-
-    if iterator > p2[1]:
-        iterator = p1[1]
-    
-    if iterator < p1[1]:
-        iterator = p1[1]
-
-    cv2.rectangle(frame, p1, p2, rectangle_color, 1)
-    cv2.line(frame, (p1[0], iterator),(p2[0] , iterator), line_color, 1)
-
-    return frame, iterator
-
-
-def get_bordes(frame):
-
+def image_edges(frame):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    bordes = cv2.Canny(gray, 20, 220, (9, 9), L2gradient=True)
+    edges = cv2.Canny(gray, 20, 220, (9, 9), L2gradient=True)
+    return edges
 
-    return bordes
 
-
-def get_centros_de_masas(contornos):
-
-    centro_masa = np.empty([len(contornos),2])
-
-    for i in range(len(contornos)):
-        
-        momentos = cv2.moments(contornos[i])
-        if momentos["m00"]:
-            centro_masa[i,:]= (
-                momentos["m10"] / momentos["m00"],
-                momentos["m01"] / momentos["m00"]
-            )   
+def mass_center(contours):
+    mass_centers = np.empty([len(contours), 2])
+    for i, contour in enumerate(contours):
+        moments = cv2.moments(contour)
+        if moments["m00"]:
+            mass_centers[i, :] = (
+                moments["m10"] / moments["m00"],
+                moments["m01"] / moments["m00"]
+            )
         else:
-            centro_masa[i,:] = (0,0)
-             
-    return centro_masa
+            mass_centers[i, :] = (0, 0)
+
+    return mass_centers
 
 
-def get_marcadores_indice(contornos, herencia):
+def search_candidate_markers(contours, hierarchy):
+    marks_candidates = []
 
-    mark = 0
-    A, B, C = None, None, None
-    for i in range(len(contornos)):
-        
-        approx = cv2.approxPolyDP(contornos[i],cv2.arcLength(contornos[i],True)*0.02,True)
+    for i, contour in enumerate(contours):
+        approx = cv2.approxPolyDP(
+            contour,
+            cv2.arcLength(contour, True) * 0.02,
+            True
+        )
         if len(approx) == 4:
-            k=i
-            cc=0
-            
-            while (herencia[0,k,2] != -1):
-                k = herencia[0,k,2]
-                cc = cc+1
-        
-            if (herencia[0,k,2] != -1):
-                cc = cc+1
-        
-            if cc>=5: 
-                if(mark==0):
-                    A = i
-                elif (mark==1):
-                    B=i
-                elif (mark==2):
-                    C=i
-                mark = mark+1
-    
-    return mark, A, B, C
+            k = i
+            cc = 0
+
+            while (hierarchy[0, k, 2] != -1):
+                k = hierarchy[0, k, 2]
+                cc += 1
+
+            if (hierarchy[0, k, 2] != -1):
+                cc += 1
+
+            if cc >= 5:
+                marks_candidates.append(i)
+
+    return marks_candidates
 
 
-def get_offline(centros_de_masas, A, B, C):
-    
-    AB = distancia(centros_de_masas[A,:], centros_de_masas[B,:])
-    BC = distancia(centros_de_masas[B,:], centros_de_masas[C,:])
-    CA = distancia(centros_de_masas[C,:], centros_de_masas[A,:])
-
-    if((AB>BC)and(AB>CA)):
-        valor_mayor = C
-        mediana_1 = A
-        mediana_2 = B
-    elif ((CA>AB)and(CA>BC)):
-        valor_mayor = B
-        mediana_1 = A
-        mediana_2 = C
-    elif((BC > AB) and (BC > CA)):
-        valor_mayor = A
-        mediana_1 = B
-        mediana_2 = C
-    
-    return valor_mayor, mediana_1, mediana_2
+def find_correct_mark(marks_candidates):
+    A = marks_candidates[0]
+    B = marks_candidates[1]
+    C = marks_candidates[2]
+    return A, B, C
 
 
-def get_orientation(align, slope, dist, centros_de_masas, mediana_1, mediana_2):
+def find_offline_point(mass_centers, A, B, C):
+    AB = distance(mass_centers[A, :], mass_centers[B, :])
+    BC = distance(mass_centers[B, :], mass_centers[C, :])
+    CA = distance(mass_centers[C, :], mass_centers[A, :])
 
+    if CA < AB > BC:
+        offline_point = C
+        return offline_point, A, B
+    if BC < CA > AB:
+        offline_point = B
+        return offline_point, A, C
+    if CA < BC > AB:
+        offline_point = A
+        return offline_point, B, C
+
+    raise OffLineError
+
+
+def get_orientation(align, slope, dist, mass_centers, mediana_1, mediana_2):
     if not align:
         botton = mediana_1
         rigth = mediana_2
-    elif(slope < 0 and dist < 0): #orientacion norte
-        orientation= CV_QR_NORTH
-        if(centros_de_masas[mediana_1][1] > centros_de_masas[mediana_2][1]):
+    elif slope < 0 and dist < 0:
+        orientation = QR_NORTH
+        if mass_centers[mediana_1][1] > mass_centers[mediana_2][1]:
             botton = mediana_1
             rigth = mediana_2
         else:
             botton = mediana_2
-            rigth = mediana_1       
-    elif(slope>0 and dist<0): #orientacion este
-        orientation= CV_QR_EAST
-        if(centros_de_masas[mediana_1][0] > centros_de_masas[mediana_2][0]):
+            rigth = mediana_1
+    elif dist < 0 < slope:
+        orientation = QR_EAST
+        if mass_centers[mediana_1][0] > mass_centers[mediana_2][0]:
             botton = mediana_2
             rigth = mediana_1
         else:
             botton = mediana_1
             rigth = mediana_2
-    elif(slope<0 and dist>0): #orientacion sur
-        orientation= CV_QR_SOUTH 
-        if(centros_de_masas[mediana_1][1] > centros_de_masas[mediana_2][1]):
+    elif slope < 0 < dist:
+        orientation = QR_SOUTH
+        if mass_centers[mediana_1][1] > mass_centers[mediana_2][1]:
             botton = mediana_2
             rigth = mediana_1
         else:
             botton = mediana_1
             rigth = mediana_2
-    elif(slope>0 and dist >0):#orientacion oeste
-        orientation = CV_QR_WEST
-        if(centros_de_masas[mediana_1][0] > centros_de_masas[mediana_2][0]):
+    elif slope > 0 and dist > 0:
+        orientation = QR_WEST
+        if mass_centers[mediana_1][0] > mass_centers[mediana_2][0]:
             botton = mediana_1
             rigth = mediana_2
         else:
             botton = mediana_2
-            rigth = mediana_1    
+            rigth = mediana_1
 
     return orientation, botton, rigth
 
 
-def correccion_perspectiva(vertices, imagen):
+def perspective_correction(vertices, image):
 
-    dst = np.array(((40,40),(440,40),(440,440),(40,440)),dtype=np.float32)
-    warp_matrix = cv2.getPerspectiveTransform(vertices,dst)
-    warped = cv2.warpPerspective(imagen, warp_matrix,(500,500),borderMode=cv2.BORDER_REPLICATE)
-    imagen = cv2.copyMakeBorder(warped,10,10,10,10,cv2.BORDER_CONSTANT,value=(255,255,255))
-    
-    _, binary = cv2.threshold(cv2.cvtColor(imagen,cv2.COLOR_BGR2GRAY), 100,255,cv2.THRESH_BINARY)
-    _, otsu = cv2.threshold(cv2.cvtColor(imagen,cv2.COLOR_BGR2GRAY),0,255,cv2.THRESH_BINARY+cv2.THRESH_OTSU)
-
-    return binary, otsu
-
-def plot_marcadores(imagen, contornos, top, rigth, bottom, N, tickness=1):
-
-    cv2.drawContours(imagen, contornos, top, (255, 200, 0), tickness)
-    cv2.drawContours(imagen, contornos, rigth, (0, 0, 255), tickness)
-    cv2.drawContours(imagen, contornos, bottom, (255, 0, 100), tickness)
-    cv2.circle(imagen, tuple(N), 5, (0, 0, 255), 5, tickness)
-
-    return imagen
+    dst = np.array(((40, 40), (440, 40), (440, 440), (40, 440)), dtype=np.float32)
+    warp_matrix = cv2.getPerspectiveTransform(vertices, dst)
+    warped = cv2.warpPerspective(
+        image,
+        warp_matrix,
+        (500, 500),
+        borderMode=cv2.BORDER_REPLICATE
+    )
+    image = cv2.copyMakeBorder(
+        warped,
+        10, 10, 10, 10,
+        cv2.BORDER_CONSTANT,
+        value=(255, 255, 255)
+    )
+    return image
 
 
-def plot_vertices(imagen, L, M, O, N):
+def binarize_image(image, thresh=-1):
 
-    cv2.circle(imagen, tuple(L[0]), 2, (255, 255, 0), -1, 8, 0)
-    cv2.circle(imagen, tuple(L[1]), 2, (0, 255, 0), -1, 8, 0)
-    cv2.circle(imagen, tuple(L[2]), 2, (0, 0, 255), -1, 8, 0)
-    cv2.circle(imagen, tuple(L[3]), 2, (128, 128, 128), -1, 8, 0)
+    if thresh == -1:
+        _, otsu = cv2.threshold(
+            cv2.cvtColor(image, cv2.COLOR_BGR2GRAY),
+            0, 255,
+            cv2.THRESH_BINARY+cv2.THRESH_OTSU
+        )
+        return otsu
 
-    cv2.circle(imagen, tuple(M[0]), 2, (255, 255, 0), -1, 8, 0)
-    cv2.circle(imagen, tuple(M[1]), 2, (0, 255, 0), -1, 8, 0)
-    cv2.circle(imagen, tuple(M[2]), 2, (0, 0, 255), -1, 8, 0)
-    cv2.circle(imagen, tuple(M[3]), 2, (128, 128, 128), -1, 8, 0)
-
-    cv2.circle(imagen, tuple(O[0]), 2, (255, 255, 0), -1, 8, 0)
-    cv2.circle(imagen, tuple(O[1]), 2, (0, 255, 0), -1, 8, 0)
-    cv2.circle(imagen, tuple(O[2]), 2, (0, 0, 255), -1, 8, 0)
-    cv2.circle(imagen, tuple(O[3]), 2, (128, 128, 128), -1, 8, 0)
-
-    cv2.circle(imagen, tuple(N), 5, (70, 252, 252), -1, 8, 0)
+    _, binary = cv2.threshold(
+        cv2.cvtColor(image, cv2.COLOR_BGR2GRAY),
+        thresh, 255,
+        cv2.THRESH_BINARY
+    )
+    return binary
 
 
-def plot_lineas(imagen, M, O, N):
-    
-    cv2.line(imagen, tuple(M[1]), tuple(N), (0, 0, 255), 1, 8, 0)
-    cv2.line(imagen, tuple(O[3]), tuple(N), (0, 0, 255), 1, 8, 0)
+def plot_markers(image, contours, top, rigth, bottom, N, tickness=1):
+
+    cv2.drawContours(image, contours, top, (255, 200, 0), tickness)
+    cv2.drawContours(image, contours, rigth, (0, 0, 255), tickness)
+    cv2.drawContours(image, contours, bottom, (255, 0, 100), tickness)
+
+    return image
 
 
-def decode_qr(qr_codificado):
+def plot_vertices(image, L, M, O, N):
+    cv2.circle(image, tuple(L[0]), 2, (255, 255, 0), -1, 8, 0)
+    cv2.circle(image, tuple(L[1]), 2, (0, 255, 0), -1, 8, 0)
+    cv2.circle(image, tuple(L[2]), 2, (0, 0, 255), -1, 8, 0)
+    cv2.circle(image, tuple(L[3]), 2, (128, 128, 128), -1, 8, 0)
 
-    qr_Data, qr_Type = None, None
+    cv2.circle(image, tuple(M[0]), 2, (255, 255, 0), -1, 8, 0)
+    cv2.circle(image, tuple(M[1]), 2, (0, 255, 0), -1, 8, 0)
+    cv2.circle(image, tuple(M[2]), 2, (0, 0, 255), -1, 8, 0)
+    cv2.circle(image, tuple(M[3]), 2, (128, 128, 128), -1, 8, 0)
+
+    cv2.circle(image, tuple(O[0]), 2, (255, 255, 0), -1, 8, 0)
+    cv2.circle(image, tuple(O[1]), 2, (0, 255, 0), -1, 8, 0)
+    cv2.circle(image, tuple(O[2]), 2, (0, 0, 255), -1, 8, 0)
+    cv2.circle(image, tuple(O[3]), 2, (128, 128, 128), -1, 8, 0)
+
+    cv2.circle(image, tuple(N), 5, (70, 252, 252), -1, 8, 0)
+
+
+def plot_lines(image, M, O, N):
+    cv2.line(image, tuple(M[1]), tuple(N), (0, 0, 255), 1, 8, 0)
+    cv2.line(image, tuple(O[3]), tuple(N), (0, 0, 255), 1, 8, 0)
+
+
+def qr_scanner(image, thresh=-1, verbose=False):
+    ret = ()
+    edges = image_edges(image)
+
+    #APPROX SIMPLE -> SE QUEDA CON LOS PUNTOS MAS EXTERNOS DEL CONTORNO
+    #APPROX NONE -> DEVUELVE TODOS LOS PUNTOS
+    contours, herencia = cv2.findContours(
+        np.copy(edges),
+        cv2.RETR_TREE,
+        cv2.CHAIN_APPROX_TC89_KCOS
+    )
+    mass_centers = mass_center(contours)
+    marks_candidates = search_candidate_markers(contours, herencia)
+
+    if len(marks_candidates) >= 3: #marcadores descubiertos
+
+        A, B, C = find_correct_mark(marks_candidates)
+        area_A = cv2.contourArea(contours[A])
+        area_B = cv2.contourArea(contours[B])
+        area_C = cv2.contourArea(contours[C])
+
+        average_area = (area_A + area_B + area_C) / 3
+
+        if not ((average_area * 0.8 < area_A < average_area * 1.2)
+                and (average_area * 0.8 < area_B < average_area * 1.2)
+                and (average_area * 0.8 < area_C < average_area * 1.2)):
+            return
+
+        try:
+            top, mediana_1, mediana_2 = find_offline_point(mass_centers, A, B, C)
+        except OffLineError:
+            return
+
+        dist = distance_line_to_point(
+            mass_centers[mediana_1],
+            mass_centers[mediana_2],
+            mass_centers[top]
+        )
+        slope, align = line_slope(
+            mass_centers[mediana_1],
+            mass_centers[mediana_2]
+        )
+
+        orientation, bottom, rigth = get_orientation(
+            align,
+            slope,
+            dist,
+            mass_centers,
+            mediana_1,
+            mediana_2
+        )
+
+        if (cv2.contourArea(contours[top]) > 10
+                and cv2.contourArea(contours[rigth]) > 10
+                and cv2.contourArea(contours[bottom]) > 10):
+            image_point = np.copy(image)
+            L = update_corner_orientation(
+                orientation,
+                get_vertices(contours[top], image_point, verbose)
+            )
+            M = update_corner_orientation(
+                orientation,
+                get_vertices(contours[rigth], image_point, verbose)
+            )
+            O = update_corner_orientation(
+                orientation,
+                get_vertices(contours[bottom], image_point, verbose)
+            )
+            try:
+                N = intersection_between_two_lines(M[1], M[2], O[3], O[2])
+            except PointIntersectionError:
+                return None
+            try:
+                pixel = image[N[1], N[0]]
+            except:
+                return
+
+            external_vertices = np.array(([L[0], M[1], N, O[3]]), dtype=np.float32)
+            corrected_perspective = perspective_correction(
+                external_vertices,
+                image
+            )
+
+            ret = (
+                binarize_image(
+                    corrected_perspective,
+                    thresh
+                ),
+                plot_markers(
+                    np.copy(image),
+                    contours,
+                    top, rigth,
+                    bottom, N,
+                    tickness=3
+                )
+            )
+
+            if verbose:
+                traces = np.zeros((np.shape(image)), dtype=np.uint8)
+                cv2.drawContours(traces, contours, top, (255, 0, 100), 1)
+                cv2.drawContours(traces, contours, rigth, (255, 0, 100), 1)
+                cv2.drawContours(traces, contours, bottom, (255, 0, 100), 1)
+
+                plot_vertices(traces, L, M, O, N)
+                plot_lines(traces, M, O, N)
+
+                orientations = {
+                    QR_NORTH : "NORTH",
+                    QR_SOUTH : "SOUTH",
+                    QR_EAST : "EAST",
+                    QR_WEST : "WEST",
+                }
+                cv2.putText(
+                    traces,
+                    orientations[orientation],
+                    (20, 30),
+                    cv2.FONT_HERSHEY_PLAIN,
+                    1, (0, 255, 0), 1, 8
+                )
+                cv2.imshow("traces", traces)
+
+    return ret
+
+
+def qr_decoder(qr_codificado):
+    decoded_data = None
     qrs = pyzbar.decode(qr_codificado)
+
     for qr in qrs:
+        decoded_data = qr.data.decode("utf-8")
 
-        qr_Data = qr.data.decode("utf-8")
-        qr_Type = qr.type
+    return decoded_data
 
-        
-    return qr_Data, qr_Type
 
-'''
-barcodes = pyzbar.decode(qr_final)
-img_barcode = np.copy(thress)
-for barcode in barcodes:
+class ScannerComponent():
+    def __init__(self, line_speed, percentage):
+        self._percentage = percentage
+        self._line_speed = line_speed
+        self._iter = 0
 
-    (x, y, w, h) = barcode.rect
-    cv2.rectangle(img_barcode, (x, y), (x + w, y + h), (0, 0, 255), 2)
-    barcodeData = barcode.data.decode("utf-8")
-    barcodeType = barcode.type
-    # draw the barcode data and barcode type on the image
-    text = "{} ({})".format(barcodeData, barcodeType)
-    cv2.putText(img_barcode, text, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 
-    0.5, (0, 0, 255), 2)
-    # print the barcode type and data to the terminal
-    #print("[INFO] Found {} barcode: {}".format(barcodeType, barcodeData))
+    def set_input_frame(self, frame):
+        middle_x = int(frame.shape[1] / 2)
+        middle_y = int(frame.shape[0] / 2)
 
-cv2.imshow("barcode",img_barcode)
-'''
+        delta_x = int((frame.shape[1] * self._percentage[0]) / 2)
+        delta_y = int((frame.shape[0] * self._percentage[1]) / 2)
+
+        self.min_x = middle_x - delta_x
+        self.max_x = middle_x + delta_x
+        self.min_y = middle_y - delta_y
+        self.max_y = middle_y + delta_y
+
+        self.frame = frame
+        self._central_image = np.copy(
+            frame[
+                self.min_y:self.max_y,
+                self.min_x:self.max_x
+            ]
+        )
+
+    def get_central_image(self):
+        return self._central_image
+
+    def draw(self):
+        background = cv2.GaussianBlur(self.frame, (25,25), 5)
+        background[
+            self.min_y:self.max_y,
+            self.min_x:self.max_x
+        ] = self._central_image
+
+        rectangle_color = (169, 169, 172)
+        line_color = (0, 0, 255)
+
+        cv2.rectangle(
+            background,
+            (self.min_x, self.min_y),
+            (self.max_x, self.max_y),
+            rectangle_color,
+            1
+        )
+        cv2.line(
+            background,
+            (self.min_x, self._iter),
+            (self.max_x, self._iter),
+            line_color,
+            1
+        )
+        self._increase_iterator()
+        return background
+
+    def _increase_iterator(self):
+        if(self._iter >= self.max_y or self._iter <= self.min_y):
+            self._iter = self.min_y
+        self._iter += self._line_speed

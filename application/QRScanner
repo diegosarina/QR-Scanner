@@ -1,0 +1,83 @@
+#!/usr/bin/python3
+
+# Standard library imports
+import argparse
+
+# Third party imports
+
+# Local application imports
+from arghandlers import *
+
+
+# common parameters between commands
+parent_parser = argparse.ArgumentParser(add_help=False)
+parent_parser.add_argument(
+    '-v',
+    '--verbose',
+    action='store_true',
+    help='verbose mode'
+)
+parent_parser.add_argument(
+    '-t',
+    dest='thresh',
+    action='store',
+    type=int,
+    help='binarization thresh level',
+    default=-1
+)
+
+main_parser = argparse.ArgumentParser(
+    prog='QRScanner',
+    description="qr decode application")
+subparser = main_parser.add_subparsers(help='data input sources') 
+
+# video command
+video_parse = subparser.add_parser(
+    'video',
+    description='input data from video',
+    parents=[parent_parser]
+)
+
+video_source_gropu = video_parse.add_mutually_exclusive_group()
+video_source_gropu.add_argument(
+    '-d',
+    dest='device',
+    action='store',
+    type=int,
+    default=-1,
+    help='id of the video capturing device (i.e. a camera index)'
+)
+video_source_gropu.add_argument(
+    '-f',
+    dest='filename',
+    action='store',
+    help='path of the video file (eg. /home/video.avi)'
+)
+
+video_parse.add_argument(
+    '-c',
+    '--continuous',
+    action='store_true',
+    help='continuous detection'
+)
+video_parse.set_defaults(func=video_handler)
+
+
+# image command
+image_parse = subparser.add_parser(
+    'image',
+    description='input data from image',
+    parents=[parent_parser]
+)
+image_parse.add_argument(
+    '-p',
+    dest='path',
+    action='store',
+    help='image path',
+    default='qr_images/qr_north.jpg'
+)
+image_parse.set_defaults(func=image_handler)
+
+
+args = main_parser.parse_args()
+args.func(args)
